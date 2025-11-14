@@ -1,0 +1,41 @@
+**Explaining Upkie's Architecture:**
+
+---
+
+## 1. **Spine** (C++ process)
+
+Think of it as the **"nervous system"** of the robot:
+- Runs continuously in the background
+- Talks directly to motors/sensors (hardware) OR simulator (PyBullet/Genesis)
+- Handles low-level timing-critical tasks (reading sensors, sending commands)
+- Written in C++ for **speed** and **real-time performance**
+
+**Why separate?** Hardware control needs precise timing. C++ is faster than Python for this.
+
+---
+
+## 2. **Python Agents** connect to spine
+
+Your **control logic** (the "brain"):
+- Written in Python (easier to code than C++)
+- Connects to the running spine process
+- Sends: desired actions (e.g., "move left wheel at speed X")
+- Receives: sensor data (e.g., "robot tilting 5° forward")
+- Can be stopped/restarted without restarting the spine
+
+**Flow:**
+```
+Python Agent → sends actions → Spine → controls motors
+Python Agent ← receives state ← Spine ← reads sensors
+```
+
+---
+
+## 3. **Gymnasium-compatible RL environments**
+
+Provides a **standardized interface** for reinforcement learning:
+- `env.reset()` - Start episode
+- `env.step(action)` - Send action, get observation/reward
+- Compatible with RL libraries (Stable Baselines3, etc.)
+
+**Benefit:** Same code works for simulation AND real robot!
