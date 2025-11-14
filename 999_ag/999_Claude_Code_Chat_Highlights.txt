@@ -1,3 +1,7 @@
+================================================================================
+SECTION 1: Architecture Overview
+================================================================================
+
 **Explaining Upkie's Architecture:**
 
 ---
@@ -39,3 +43,178 @@ Provides a **standardized interface** for reinforcement learning:
 - Compatible with RL libraries (Stable Baselines3, etc.)
 
 **Benefit:** Same code works for simulation AND real robot!
+
+
+================================================================================
+SECTION 2: Detailed Robot Capabilities
+================================================================================
+
+**Comprehensive Breakdown of What Upkie Can Do**
+
+---
+
+# **1. ROBOT TASKS & MOVEMENTS**
+
+### **Balancing**
+- **MPC Balancing**: Model Predictive Control, 1-second lookahead, max 3.0 m/s, fall detection at 1.0 rad
+- **PD Balancing**: Simple gain-based feedback, lightweight alternative
+
+### **Locomotion**
+- **Forward/Backward**: ±1.5 m/s typical speed, smooth acceleration
+- **Yaw Rotation**: In-place turning, max 1.0 rad/s
+
+### **Posture Control**
+- **Standing**: IK-based neutral pose at 200 Hz
+- **Crouching**: 0.08m max height change, 0.05 m/s velocity
+- **Leaning**: ±0.02m side-to-side shift
+
+### **Trajectory Execution**
+- **Playback**: CSV files with time-scaling, combines with balancing
+
+### **Remote Control**
+- **Joystick**: Left stick=move, right stick=turn, D-pad=crouch/lean, emergency stop
+
+---
+
+# **2. CONTROL STRATEGIES**
+
+### **MPC (Model Predictive Control)**
+- Wheeled inverted pendulum model (4 states)
+- ProxQP solver, 50 timestep horizon (1 sec)
+- Real-time optimization with fall detection
+
+### **PID/PD**
+- C++ implementation for speed
+- Pitch/position/velocity gains
+- Integral clamping, gain scaling when turning
+
+### **Inverse Kinematics (IK)**
+- Pink library (Pinocchio-based)
+- 200 Hz updates, frame + posture tasks
+- Controls leg configuration for height/lean
+
+### **Reinforcement Learning**
+- PPO algorithm via Stable Baselines3
+- Vectorized training environments
+- Domain randomization support
+
+### **Torque-Based**
+- Direct feedforward commands
+- moteus protocol: τ = τ_ff + kp×error + kd×velocity_error
+- 200-1000 Hz updates
+
+---
+
+# **3. SENSORS & OBSERVATIONS**
+
+### **IMU**
+- pi3hat onboard with UKF fusion
+- Orientation (quaternion), angular velocity, linear acceleration
+- Gravity-compensated outputs
+
+### **Joint Encoders** (6 joints)
+- Position (rad), velocity (rad/s), torque (N·m)
+- Temperature (°C), voltage (V)
+- Hips/knees: 16 Nm, wheels: 1.7 Nm
+
+### **Observers**
+- **Base Orientation**: Pitch angle, angular velocity
+- **Wheel Odometry**: Ground position/velocity from wheel rotation
+- **Floor Contact**: Fusion of wheel contact + leg torque signals
+
+### **Human Interface**
+- Joystick (gamepad), keyboard (arrows/WASD)
+
+### **System**
+- CPU temperature monitoring
+
+---
+
+# **4. PLATFORMS**
+
+### **Real Hardware**
+- Raspberry Pi 4/5 + pi3hat r4.5
+- mjbots servos (4× qdd100, 2× mj5208)
+- 1000 Hz control loop, real-time scheduling
+
+### **PyBullet Simulator**
+- GPU-accelerated physics
+- GUI visualization, contact rendering
+- Supports randomization
+
+### **Genesis Simulator**
+- Next-gen physics engine
+- Differentiable, photorealistic rendering
+- Faster than PyBullet
+
+### **Mock Backend**
+- No physics, instant steps
+- For testing/CI/CD
+
+---
+
+# **5. CONFIGURATION**
+
+### **Robot Parameters**
+- Leg length: 0.58m, mass: 5.34kg, wheel radius: 0.06m
+- User override: `~/.config/upkie/config.yml`
+
+### **Spine Config**
+- Floor/wheel contact thresholds
+- Odometry signed radius per wheel
+
+### **Agent Config** (Gin files)
+- Height controller: crouch/lean limits
+- Remote control: max velocities
+- Wheel controller: fall threshold, gain scaling
+- Per-robot configs by hostname
+
+### **Environments**
+- **Pendulum**: 1D action (ground velocity), 4D obs
+- **Servos**: 6-joint dict action (position/velocity/torque/gains), full joint state obs
+
+### **Joint Limits**
+- Hips: ±1.26 rad, knees: ±2.51 rad
+- Max velocities: 28.8 rad/s (hips/knees), 111 rad/s (wheels)
+
+---
+
+# **6. ADVANCED FEATURES**
+
+### **Domain Randomization**
+- Initial state perturbations (position/velocity/orientation)
+- Inertia variation (±30%)
+- Sensor noise (control + measurement)
+- External force disturbances
+
+### **Wrappers**
+- Action: differentiate, noisify, add lag
+- Observation: noisify, add action history
+- Disturbance: random push
+
+### **Logging**
+- MessagePack binary format
+- Full obs-action-reward history
+- Microsecond timestamps
+
+### **Optimization**
+- CPU isolation, SCHED_FIFO priority
+- Frequency regulation (200-1000 Hz)
+
+### **Visualization**
+- MeshCat for IK
+- PyBullet/Genesis GUI modes
+
+### **Testing**
+- pytest (Python), Bazel (C++)
+- Ruff + cpplint
+- Mock backend for CI
+
+### **Extensibility**
+- Custom observers, controllers, sensors
+- Plugin architecture
+- Online reconfiguration
+
+### **Tools**
+- Raspunzel: remote build/deploy to Pi
+- Bazelisk: version management
