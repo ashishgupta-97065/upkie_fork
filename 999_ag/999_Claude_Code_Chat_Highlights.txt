@@ -224,11 +224,49 @@ SECTION 2: Detailed Robot Capabilities
 SECTION 3: Understanding Balancing Strategies
 ================================================================================
 
-**Deep Dive: PD vs MPC Balancing**
+**Deep Dive: Three Balancing Approaches**
 
 ---
 
-## **1. PD Balancing** (Simple)
+## **1. Torque Balancing** (Direct Control - Simplest)
+
+**What it is:**
+- Uses **feedforward torque** commands directly to wheel motors
+- Simple proportional control: `torque = GAIN × pitch`
+- No velocity feedback (open-loop on wheels)
+
+**How it works:**
+```python
+GAIN = 10.0  # N·m/rad
+pitch = observation["base_orientation"]["pitch"]
+left_wheel_torque = +GAIN × pitch
+right_wheel_torque = -GAIN × pitch
+```
+
+**Characteristics:**
+- **Most direct**: Commands torque (N·m) to motors
+- **Open-loop**: No velocity error feedback
+- **Pure feedforward**: Just proportional to pitch
+- **Simple**: Easiest to understand
+
+**Example:** `examples/pybullet/torque_balancing.py`
+- Gain: 10.0 N·m/rad
+- Disables velocity feedback (kd_scale = 0.0)
+- Legs held extended with position control
+
+**Advantages:**
+- Most direct control (no servo feedback interference)
+- Easy to understand forces applied
+- Good for learning control basics
+
+**Disadvantages:**
+- No built-in velocity damping
+- Can be less stable than PD
+- Requires good torque sensing/estimation
+
+---
+
+## **2. PD Balancing** (Velocity Control - Simple)
 
 **What it is:**
 - **Proportional-Derivative** feedback control
@@ -246,13 +284,13 @@ wheel_torque = Kp × pitch_error + Kd × angular_velocity_error
 - **Reactive**: Responds to current state only
 - **Tuning**: Find good Kp, Kd gains through trial/error
 
-**Example:** `examples/pybullet/torque_balancing.py`
-- Gain: 10.0 N·m/rad (proportional to pitch)
-- No derivative term in that simple example
+**Example:** `examples/pybullet/pd_balancing.py`
+- Commands velocity to wheels
+- Derivative term for damping
 
 ---
 
-## **2. MPC Balancing** (Advanced)
+## **3. MPC Balancing** (Predictive - Advanced)
 
 **What it is:**
 - **Model Predictive Control**
@@ -279,27 +317,38 @@ wheel_torque = Kp × pitch_error + Kd × angular_velocity_error
 
 ## **Key Differences:**
 
-| Aspect | PD | MPC |
-|--------|----|----|
-| **Computation** | Instant (multiply) | Heavy (optimization) |
-| **Lookahead** | None (reactive) | 1 second ahead |
-| **Optimality** | Heuristic gains | Mathematically optimal |
-| **Constraints** | Hard to enforce | Built-in (velocity limits) |
-| **Tuning** | Trial-and-error gains | Design cost function |
-| **Performance** | Good for simple tasks | Better for complex motions |
-| **CPU Usage** | Minimal | Higher (ProxQP solver) |
+| Aspect | Torque | PD | MPC |
+|--------|--------|----|----|
+| **Control Output** | Direct torque (N·m) | Velocity (rad/s) | Ground accel (m/s²) |
+| **Computation** | Instant (multiply) | Instant (multiply) | Heavy (optimization) |
+| **Lookahead** | None (reactive) | None (reactive) | 1 second ahead |
+| **Feedback Loops** | Pitch only | Pitch + velocity | Full state prediction |
+| **Optimality** | Heuristic gain | Heuristic gains | Mathematically optimal |
+| **Constraints** | Hard to enforce | Hard to enforce | Built-in (velocity limits) |
+| **Tuning** | Single gain | Multiple gains | Design cost function |
+| **Performance** | Basic balancing | Good for simple tasks | Best for complex motions |
+| **Stability** | Lower (no damping) | Better (velocity damping) | Best (predictive) |
+| **CPU Usage** | Minimal | Minimal | Higher (ProxQP solver) |
 
 ---
 
 ## **When to use each?**
 
-**PD:**
-- Learning/prototyping
+**Torque Balancing:**
+- Learning control theory basics
+- Understanding force application
+- Prototyping simplest approach
+- When you need precise torque control
+
+**PD Balancing:**
+- Learning/prototyping with better stability
 - Low-power systems
 - Simple balancing in place
+- When velocity damping is needed
 
-**MPC:**
+**MPC Balancing:**
 - Moving while balancing (locomotion)
 - Respecting physical limits
 - Optimal performance needed
 - Research applications
+- Complex multi-objective control
