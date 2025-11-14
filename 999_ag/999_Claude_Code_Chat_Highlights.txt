@@ -352,3 +352,173 @@ wheel_torque = Kp × pitch_error + Kd × angular_velocity_error
 - Optimal performance needed
 - Research applications
 - Complex multi-objective control
+
+
+================================================================================
+SECTION 4: PD Control Deep Dive - How It Works & Failure Cases
+================================================================================
+
+## **How IMU Measures Pitch**
+
+**Key Concept: Pitch = ANGLE, NOT Angular Velocity**
+
+**IMU provides TWO separate measurements:**
+- **Accelerometer** → Detects gravity direction → Orientation ANGLE (pitch)
+- **Gyroscope** → Detects rotation rate → Angular velocity
+
+**Critical: Even static tilted robot has pitch ≠ 0!**
+- Accelerometer senses gravity sideways → calculates tilt angle
+- Robot leaning at 30° while motionless still reads pitch = 30°
+
+**Data Flow:**
+```
+IMU Hardware (pi3hat r4.5)
+  ↓ UKF sensor fusion (40 kHz)
+Orientation (quaternion) + Angular velocity
+  ↓ BaseOrientation Observer (upkie/cpp/observers/BaseOrientation.cpp)
+Pitch Angle (rad)
+  ↓
+observation[0] in Pendulum env
+```
+
+---
+
+## **PD Code Breakdown**
+
+**File:** `examples/pd_balancing.py`
+
+**Environment:** `Upkie-PyBullet-Pendulum` at 1000 Hz
+
+**Observation Space (4D):**
+```python
+observation[0] = pitch (rad)           # Base tilt angle
+observation[1] = ground_position (m)   # Distance traveled
+observation[2] = angular_velocity      # NOT USED in this code
+observation[3] = ground_velocity (m/s) # Speed
+```
+
+**Control Law:**
+```python
+action = np.clip(
+    a=[10.0 * pitch              # P term: pitch correction
+       + 1.0 * ground_position   # P term: position regulation
+       + 0.1 * ground_velocity], # D term: velocity damping
+    a_min=-0.99, a_max=0.99
+)
+```
+
+**Term-by-Term:**
+1. **10.0 × pitch**: Main balancing - "lean forward → wheels forward"
+2. **1.0 × ground_position**: Return to origin - "drifted away → push back"
+3. **0.1 × ground_velocity**: Damping - "moving fast → slow down" (prevents oscillation)
+
+**Why These Gains?**
+- 10.0 (pitch): Strong response, primary balancing
+- 1.0 (position): Moderate, keeps near origin
+- 0.1 (velocity): Gentle damping, stability without sluggishness
+- Empirically tuned for this robot
+
+---
+
+## **Failure Case 1: Robot Against Wall**
+
+**Scenario:** Robot at 30° against wall, motors off → switch on
+
+**What Happens:**
+```
+IMU reads: pitch = 30° (accelerometer detects tilt!)
+           angular_velocity = 0 (not rotating)
+
+Controller: action = 10.0 × 0.524 = 5.24
+           "Tilt 30° forward → spin wheels forward strongly!"
+
+Result: Wheels try to spin → wall blocks motion
+        → Robot stays at 30°, fighting wall indefinitely
+```
+
+**Problem:** Controller "blind" to external constraints
+- Only sees pitch angle from IMU
+- Doesn't know wall exists
+- Keeps commanding forward motion despite no progress
+
+**If wall removed:** Robot suddenly accelerates forward, likely overshoots and crashes
+
+---
+
+## **Failure Case 2: Vertical Torso, Bent Legs**
+
+**Scenario:** Legs at 30° forward, hip bent -30° back → torso vertical but unstable
+
+```
+Configuration:
+    [Torso] ← Vertical (pitch = 0°)
+      /
+     / ← Hip -30°
+    /
+   / ← Legs +30°
+  /
+[Wheels] ← Center of mass NOT above wheels!
+```
+
+**What Happens:**
+```
+IMU reads: pitch = 0° (torso IS vertical)
+           angular_velocity = 0
+
+Controller: action = 10.0 × 0 + 1.0 × 0 + 0.1 × 0 = 0
+           "Pitch is zero, everything is fine!"
+
+Result: No action commanded
+        Robot in unstable equilibrium
+        Tiny disturbance → starts falling
+        Controller reacts only after fall begins
+        Usually too late → CRASH
+```
+
+**Problem:** Simple pitch monitoring insufficient
+- Torso vertical ≠ stable robot
+- Center of mass shifted from wheels
+- No awareness of joint positions
+- Unstable configuration undetected
+
+---
+
+## **What's Missing in Simple PD Control**
+
+**Controller doesn't know:**
+- Joint positions (leg configuration)
+- Center of mass location
+- External forces/constraints (walls, objects)
+- Configuration stability
+
+**Better Approaches:**
+
+**1. Full-State Control:**
+```python
+# Monitor joint angles too
+if hip_angle < -20° or knee_angle > 20°:
+    # Unstable detected, take action
+```
+
+**2. MPC with CoM:**
+- Calculates center of mass from joint states
+- Knows "pitch = 0 but CoM unstable"
+- Proactively stabilizes
+
+**3. Height Controller (IK):**
+- Used in `agents/mpc_balancer/height_controller.py`
+- Maintains desired leg configuration
+- Prevents unstable postures
+- Keeps legs extended via inverse kinematics
+
+**File Reference:** `upkie/cpp/controllers/WheelBalancer.cpp` for C++ PD implementation
+
+---
+
+## **Key Takeaways**
+
+1. **Pitch = angle from accelerometer**, detectable even when static
+2. **Simple PD** balances torso pitch only, ignores joint configuration
+3. **External constraints** (walls) undetectable without force sensing
+4. **Vertical torso ≠ stable robot** - need joint position awareness
+5. **Real agents** (MPC balancer) use IK to maintain stable postures
