@@ -218,3 +218,88 @@ SECTION 2: Detailed Robot Capabilities
 ### **Tools**
 - Raspunzel: remote build/deploy to Pi
 - Bazelisk: version management
+
+
+================================================================================
+SECTION 3: Understanding Balancing Strategies
+================================================================================
+
+**Deep Dive: PD vs MPC Balancing**
+
+---
+
+## **1. PD Balancing** (Simple)
+
+**What it is:**
+- **Proportional-Derivative** feedback control
+- Direct reaction: "If tilting forward → spin wheels forward"
+- Pure feedback, no prediction
+
+**How it works:**
+```
+wheel_torque = Kp × pitch_error + Kd × angular_velocity_error
+```
+
+**Characteristics:**
+- **Fast**: Instant computation
+- **Simple**: Just multiply sensor values by gains
+- **Reactive**: Responds to current state only
+- **Tuning**: Find good Kp, Kd gains through trial/error
+
+**Example:** `examples/pybullet/torque_balancing.py`
+- Gain: 10.0 N·m/rad (proportional to pitch)
+- No derivative term in that simple example
+
+---
+
+## **2. MPC Balancing** (Advanced)
+
+**What it is:**
+- **Model Predictive Control**
+- Solves optimization problem: "What actions keep me balanced for next 1 second?"
+- Looks ahead, plans optimal trajectory
+
+**How it works:**
+1. Predict future (50 timesteps = 1 sec)
+2. Minimize cost: deviation from upright + control effort
+3. Apply first action from optimal sequence
+4. Repeat every timestep (receding horizon)
+
+**Characteristics:**
+- **Predictive**: Anticipates what will happen
+- **Optimal**: Minimizes cost function mathematically
+- **Constraints-aware**: Respects velocity/acceleration limits
+- **Computationally expensive**: Solves QP (quadratic program) each cycle
+
+**Model used:** Wheeled Inverted Pendulum
+- 4 states: [position, pitch, velocity, angular_velocity]
+- 1 input: ground acceleration
+
+---
+
+## **Key Differences:**
+
+| Aspect | PD | MPC |
+|--------|----|----|
+| **Computation** | Instant (multiply) | Heavy (optimization) |
+| **Lookahead** | None (reactive) | 1 second ahead |
+| **Optimality** | Heuristic gains | Mathematically optimal |
+| **Constraints** | Hard to enforce | Built-in (velocity limits) |
+| **Tuning** | Trial-and-error gains | Design cost function |
+| **Performance** | Good for simple tasks | Better for complex motions |
+| **CPU Usage** | Minimal | Higher (ProxQP solver) |
+
+---
+
+## **When to use each?**
+
+**PD:**
+- Learning/prototyping
+- Low-power systems
+- Simple balancing in place
+
+**MPC:**
+- Moving while balancing (locomotion)
+- Respecting physical limits
+- Optimal performance needed
+- Research applications
