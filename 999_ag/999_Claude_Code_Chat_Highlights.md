@@ -514,3 +514,203 @@ if hip_angle < -20° or knee_angle > 20°:
 3. **External constraints** (walls) undetectable without force sensing
 4. **Vertical torso ≠ stable robot** - need joint position awareness
 5. **Real agents** (MPC balancer) use IK to maintain stable postures
+
+
+# SECTION 5: Ground Position - Preventing Drift
+
+## **Why Ground Position Matters**
+
+**Key Insight:** Balanced (pitch = 0) ≠ Stationary (position = 0)
+
+**Without position term, robot drifts:**
+```python
+# Only pitch control
+action = 10.0 * pitch  # Balanced but can drift away!
+```
+
+**Problem scenario:**
+1. Tiny sensor bias or ground slope causes drift
+2. Robot drifts at constant velocity while staying upright (pitch ≈ 0)
+3. Controller sees pitch = 0 → "Everything fine!" → Does nothing
+4. Robot keeps drifting... 1m... 10m... eventually hits wall
+
+**Solution: Position term acts as "virtual spring"**
+```python
+action = 10.0 * pitch
+       + 1.0 * ground_position  # Pull back to origin
+       + 0.1 * ground_velocity
+```
+
+---
+
+## **Code Implementation**
+
+**File:** `upkie/cpp/observers/WheelOdometry.cpp`
+
+**Core algorithm:**
+```cpp
+void WheelOdometry::read(const Dictionary& observation) {
+  // Only update if wheels touching ground
+  if (!floor_contact("contact")) {
+    return;  // In air? Don't update
+  }
+
+  // Step 1: Calculate current velocity from wheel speeds
+  velocity_ = compute_average_velocity(floor_contact, servo);
+
+  // Step 2: Integrate to get position
+  position_ += velocity_ * params_.dt;  // position = ∫ velocity dt
+}
+```
+
+**Velocity calculation:**
+```cpp
+double compute_average_velocity(floor_contact, servo) {
+  for each wheel:
+    if (wheel_contact):
+      wheel_velocity = servo(wheel)("velocity");  // rad/s from encoder
+      linear_velocity = signed_radius * wheel_velocity;  // v = r × ω
+      velocity_sum += linear_velocity;
+
+  return average(velocity_sum);  // Average left + right wheels
+}
+```
+
+**Signed radius config** (`upkie/config/spine_config.py`):
+```python
+"wheel_odometry": {
+    "signed_radius": {
+        "left_wheel": +0.05,   # m
+        "right_wheel": -0.05   # m (opposite sign!)
+    }
+}
+```
+
+---
+
+## **Data Flow**
+
+```
+Wheel Encoders
+  ↓ Angular velocity (rad/s)
+Multiply by signed radius
+  ↓ Linear velocity (m/s)
+Average left + right wheels
+  ↓ Ground velocity
+Integrate over time (dt)
+  ↓ Ground position (m)
+  ↓
+observation[1] in Pendulum env
+```
+
+---
+
+## **Virtual Spring Analogy**
+
+**Position term = spring pulling robot to origin:**
+
+```
+Origin (0,0)  ←──spring force──  [Robot] at +3m
+```
+
+**Examples:**
+- Robot at +3m → action = 1.0 × 3.0 = +3.0 → Pull backward
+- Robot at -2m → action = 1.0 × (-2.0) = -2.0 → Push forward
+- Robot at 0m → action = 0 → No correction needed
+
+**Like Hooke's Law:** F = -k × x (spring force proportional to displacement)
+
+---
+
+## **All Three Terms Together**
+
+```python
+action = 10.0 * pitch              # "Be upright"
+       + 1.0 * ground_position     # "Be at origin"
+       + 0.1 * ground_velocity     # "Don't oscillate"
+```
+
+**Roles:**
+1. **Pitch (10.0×):** Primary balancing - prevents falling
+2. **Position (1.0×):** Station keeping - prevents drift
+3. **Velocity (0.1×):** Damping - prevents oscillation
+
+**Analogy - balancing stick on hand:**
+- **Pitch:** Chase the tilt (lean right → hand right)
+- **Position:** Return to center (moved 3 feet → bias back)
+- **Velocity:** Don't overshoot (moving fast → slow down)
+
+---
+
+## **Real-World Drift Sources**
+
+**Why robots drift without position control:**
+
+1. **Sensor bias:** IMU offset thinks pitch = 0 when actually 0.1°
+2. **Uneven ground:** Floor slope creates gravity component
+3. **Wind/disturbances:** External forces push robot
+4. **Asymmetric friction:** One wheel stickier than the other
+
+**Position term compensates for all these!**
+
+---
+
+## **Experiment: Remove Position Term**
+
+**Try modifying `examples/pd_balancing.py`:**
+```python
+action = np.clip(
+    a=[10.0 * pitch
+       # + 1.0 * ground_position  # COMMENTED OUT
+       + 0.1 * ground_velocity],
+    a_min=-0.99, a_max=0.99
+)
+```
+
+**Result:**
+- ✅ Robot balances successfully
+- ❌ Slowly drifts in one direction
+- ❌ Eventually leaves camera view
+- Still balanced, just wandering!
+
+---
+
+## **Moving to Different Location**
+
+**Want robot to balance at specific position?**
+
+```python
+target_position = 5.0  # Balance at 5 meters forward
+
+action = 10.0 * pitch
+       + 1.0 * (ground_position - target_position)  # Pull toward 5m
+       + 0.1 * ground_velocity
+```
+
+Now "virtual spring" anchored at 5m instead of 0m!
+
+---
+
+## **Assumptions & Limitations**
+
+**Wheel odometry assumes:**
+- ⚠️ No wheel slip (perfect grip)
+- ⚠️ No yaw rotation during measurement
+- ⚠️ Legs don't move (hips/knees fixed)
+
+**These assumptions break in reality → odometry drifts over time**
+
+**Better approaches:**
+- Visual odometry (camera-based)
+- LiDAR-based localization
+- Sensor fusion (IMU + wheels + vision)
+
+---
+
+## **Key Takeaways**
+
+1. **Ground position prevents drift** - keeps robot at desired location
+2. **Calculated by integrating wheel velocities** (WheelOdometry.cpp)
+3. **Acts as virtual spring** to origin (or target position)
+4. **Essential for station keeping** - balanced ≠ stationary
+5. **All three terms needed** for stable hovering at one location
