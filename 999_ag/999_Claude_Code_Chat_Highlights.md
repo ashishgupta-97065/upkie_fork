@@ -1,6 +1,4 @@
-================================================================================
-SECTION 1: Architecture Overview
-================================================================================
+# SECTION 1: Architecture Overview
 
 **Explaining Upkie's Architecture:**
 
@@ -45,9 +43,7 @@ Provides a **standardized interface** for reinforcement learning:
 **Benefit:** Same code works for simulation AND real robot!
 
 
-================================================================================
-SECTION 2: Detailed Robot Capabilities
-================================================================================
+# SECTION 2: Detailed Robot Capabilities
 
 **Comprehensive Breakdown of What Upkie Can Do**
 
@@ -220,9 +216,7 @@ SECTION 2: Detailed Robot Capabilities
 - Bazelisk: version management
 
 
-================================================================================
-SECTION 3: Understanding Balancing Strategies
-================================================================================
+# SECTION 3: Understanding Balancing Strategies
 
 **Deep Dive: Three Balancing Approaches**
 
@@ -354,9 +348,7 @@ wheel_torque = Kp × pitch_error + Kd × angular_velocity_error
 - Complex multi-objective control
 
 
-================================================================================
-SECTION 4: PD Control Deep Dive - How It Works & Failure Cases
-================================================================================
+# SECTION 4: PD Control Deep Dive - How It Works & Failure Cases
 
 ## **How IMU Measures Pitch**
 
