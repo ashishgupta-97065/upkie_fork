@@ -29,7 +29,7 @@ if __name__ == "__main__":
             ground_velocity = observation[3]
             action = np.clip(
                 a=[
-                    30.0 * pitch              # "Be upright": rads
+                    10.0 * pitch              # "Be upright": rads
                     + 1.0 * ground_position     # "Be at origin": m
                     + 0.1 * ground_velocity     # "Don't oscillate": m/s
                 ],
