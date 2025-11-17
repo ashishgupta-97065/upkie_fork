@@ -14,7 +14,6 @@ import gymnasium as gym
 import numpy as np
 # ========== AG MODIFICATION START ==========
 import time
-import pybullet
 # ========== AG MODIFICATION END ============
 
 import upkie.envs
@@ -49,9 +48,6 @@ if __name__ == "__main__":
     ]
 
     with gym.make("Upkie-PyBullet-Pendulum", frequency=1000, gui=True) as env:
-        # Access PyBullet connection from backend
-        bullet_client = env.unwrapped.backend._bullet
-
         for exp_num, exp in enumerate(experiments, start=1):
             # Print to console
             print(f"\n{'='*60}")
@@ -62,16 +58,6 @@ if __name__ == "__main__":
 
             # Full reset
             observation, info = env.reset()
-
-            # Display on PyBullet GUI (after reset to avoid being cleared)
-            text_id = pybullet.addUserDebugText(
-                text=f"Exp {exp_num}/{len(experiments)}: {exp['name']}\n"
-                     f"Pitch={exp['pitch']:.1f} | Pos={exp['pos']:.1f} | Vel={exp['vel']:.2f}",
-                textPosition=[0, 0, 2.0],  # Higher position
-                textColorRGB=[1, 0, 0],
-                textSize=3.0,  # Larger text
-                physicsClientId=bullet_client
-            )
 
             # Run for 5 seconds (5000 steps at 1000 Hz)
             for step in range(5000):
@@ -93,9 +79,6 @@ if __name__ == "__main__":
 
                 if terminated or truncated:
                     observation, info = env.reset()
-
-            # Remove text before pause
-            pybullet.removeUserDebugItem(text_id, physicsClientId=bullet_client)
 
             # 2 second pause between experiments
             if exp_num < len(experiments):
