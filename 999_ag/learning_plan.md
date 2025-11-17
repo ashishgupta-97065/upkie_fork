@@ -35,19 +35,287 @@
    - Watch values in real-time
    - Understand the relationship
 
-### **Day 5-7: C++ PD Controller**
-1. **Read:** `upkie/cpp/controllers/WheelBalancer.cpp`
-   - More sophisticated than Python example
-   - PI controller (integral term)
-   - Gain scaling when turning
-   - Air handling logic
+### **Day 5-7: C++ PD Controller → Incremental Python Implementation**
 
-2. **Compare:** What's different from simple Python version?
-   - Why integral term?
-   - Why gain scaling?
-   - How does it handle being airborne?
+**Goal:** Replicate production C++ controller features one-by-one in Python
 
-**Week 1 Deliverable:** Can explain every line of PD code, predict behavior from gains
+**Reference Code:** `upkie/cpp/controllers/WheelBalancer.cpp`
+
+---
+
+#### **Phase 1: Understand the C++ Code (Day 5 Morning)**
+
+**1. Read WheelBalancer.cpp completely:**
+   - Identify all constants (lines 12-16)
+   - Understand the `read()` function (lines 36-87)
+   - Understand the `write()` function (lines 89-111)
+
+**2. Map C++ features to your Python baseline:**
+
+| Feature | Python Baseline | C++ Production | Status |
+|---------|----------------|----------------|--------|
+| Controller type | PD | **PI** (with integral) | ❌ Missing |
+| Air handling | None | Soft-reset with low-pass filter | ❌ Missing |
+| Integral clamping | N/A | ±10 m/s | ❌ Missing |
+| Target distance limit | None | ±1m from current | ❌ Missing |
+| Non-minimum phase trick | No | Negative velocity | ❌ Missing |
+| Gain scaling (turning) | N/A | 2× → 4× when turning | ❌ Missing |
+| Fall detection | Reset on terminate | Early exit if pitch > threshold | ⚠️ Partial |
+
+**3. Create annotated copy:**
+   - Copy `pd_balancing_ag.py` → `pd_balancing_pi.py`
+   - Add comments mapping to C++ lines
+   - Ready for incremental changes
+
+---
+
+#### **Phase 2: Add Integral Term - PI Controller (Day 5 Afternoon)**
+
+**File:** `examples/pd_balancing_pi.py`
+
+**What to add:**
+```python
+# Initialize before main loop
+integral_position = 0.0
+dt = 0.001  # 1ms at 1000 Hz
+
+# Inside control loop
+position_error = 0.0 - ground_position  # Target is origin
+integral_position += position_error * dt
+integral_position = np.clip(integral_position, -10.0, +10.0)
+
+# Modified action
+action = np.clip(
+    a=[
+        10.0 * pitch                    # P: pitch
+        + 1.0 * ground_position         # P: position
+        + 0.1 * ground_velocity         # D: velocity
+        + 0.5 * integral_position       # I: accumulated error (NEW!)
+    ],
+    a_min=-0.99,
+    a_max=0.99,
+)
+```
+
+**C++ Reference:** Lines 64-66
+
+**Experiment 1: Test integral windup**
+- Remove clamping: `# integral_position = np.clip(...)`
+- Push robot hard → integral explodes
+- Robot goes unstable
+- **Learning:** Why clamping is essential
+
+**Experiment 2: Test steady-state error elimination**
+- Tilt simulator floor (if possible) or add constant bias
+- PD version: settles with offset
+- PI version: drives error to zero
+- **Learning:** Integral eliminates steady-state error
+
+**Experiment 3: Tune integral gain**
+- Try Ki = 0.1, 0.5, 1.0, 2.0
+- Too low: slow convergence
+- Too high: oscillation
+- **Learning:** Integral gain tuning trade-offs
+
+**Deliverable:** Working PI controller, understand integral behavior
+
+---
+
+#### **Phase 3: Add Air Handling (Day 6 Morning)**
+
+**What to add:**
+```python
+# Get floor contact from observation
+floor_contact = info["spine_observation"]["floor_contact"]["contact"]
+
+# Inside control loop
+if floor_contact:
+    # Normal operation: accumulate integral
+    integral_position += position_error * dt
+    integral_position = np.clip(integral_position, -10.0, +10.0)
+else:
+    # In air: soft-reset integral with exponential decay
+    decay_rate = 0.95  # Equivalent to 1s time constant
+    integral_position *= decay_rate
+```
+
+**C++ Reference:** Lines 63-80 (floor contact check and low-pass filter)
+
+**Note:** C++ uses `low_pass_filter()` function, we use simpler exponential decay for now
+
+**Experiment 1: Test without air handling**
+- Comment out the `else` block
+- Lift robot (push up) → wheels spin freely
+- Integral accumulates incorrectly
+- Landing is unstable
+- **Learning:** Why air detection matters
+
+**Experiment 2: Compare instant vs soft reset**
+- Instant reset: `integral_position = 0.0`
+- Soft reset: `integral_position *= 0.95`
+- Soft is smoother, handles sensor glitches
+- **Learning:** Soft-reset robustness
+
+**Experiment 3: False positive handling**
+- Simulate brief contact loss (flicker)
+- Soft-reset preserves state
+- **Learning:** Filter design matters
+
+**Deliverable:** PI controller with air handling
+
+---
+
+#### **Phase 4: Add Fall Detection (Day 6 Afternoon)**
+
+**What to add:**
+```python
+# Constants
+FALL_PITCH_THRESHOLD = 1.0  # rad (~57 degrees)
+
+# Inside control loop, BEFORE calculating action
+if abs(pitch) > FALL_PITCH_THRESHOLD:
+    # Robot is falling, don't try to control
+    action = np.array([0.0])
+    observation, reward, terminated, truncated, info = env.step(action)
+    if terminated or truncated:
+        observation, info = env.reset()
+        integral_position = 0.0  # Reset integral on episode reset
+    continue  # Skip rest of control loop
+```
+
+**C++ Reference:** Lines 47-50
+
+**Experiment 1: Test fall threshold**
+- Try different thresholds: 0.5, 1.0, 1.5 rad
+- Too low: gives up too early
+- Too high: fights losing battle
+- **Learning:** When to give up gracefully
+
+**Experiment 2: Integral reset on fall**
+- Don't reset integral on fall/reset
+- Next episode starts with wrong integral
+- **Learning:** State management matters
+
+**Deliverable:** Robust fall detection and recovery
+
+---
+
+#### **Phase 5: Add Target Distance Limiting (Day 7 Morning)**
+
+**What to add:**
+```python
+# Initialize
+target_ground_position = 0.0
+MAX_TARGET_DISTANCE = 1.0  # meters
+
+# When updating target (if you add velocity commands later)
+target_ground_position += target_ground_velocity * dt
+target_ground_position = np.clip(
+    target_ground_position,
+    ground_position - MAX_TARGET_DISTANCE,
+    ground_position + MAX_TARGET_DISTANCE
+)
+
+# Use target in error calculation
+position_error = target_ground_position - ground_position
+```
+
+**C++ Reference:** Lines 67-70
+
+**Note:** Current Python uses fixed target (origin). This prepares for future joystick control.
+
+**Experiment:**
+- Set target_ground_position = 10.0 (far away)
+- Without limiting: robot fights hard, unstable
+- With limiting: gracefully approaches max distance
+- **Learning:** Reachability constraints
+
+**Deliverable:** Understand target limiting (even if not actively used yet)
+
+---
+
+#### **Phase 6: Non-Minimum Phase Trick (Day 7 Afternoon)**
+
+**What to add:**
+```python
+# Current: action = ... (normal calculation)
+
+# Add trick: negate the target velocity term
+target_ground_velocity = 0.0  # Currently always zero
+trick_velocity = -target_ground_velocity  # Negative!
+
+# Recalculate action with trick
+action = np.clip(
+    a=[
+        trick_velocity                  # Note: was +target_velocity
+        - 10.0 * pitch                  # Signs flip with trick
+        - 1.0 * ground_position
+        - 0.1 * ground_velocity
+        - 0.5 * integral_position
+    ],
+    a_min=-0.99,
+    a_max=0.99,
+)
+```
+
+**C++ Reference:** Lines 83-84
+
+**Experiment:**
+- Compare with/without trick (change sign)
+- Measure settling time, overshoot
+- Subtle difference, improves stability
+- **Learning:** Advanced control theory tricks
+
+**Note:** This is the most subtle feature. Don't worry if impact isn't obvious in simulation.
+
+**Deliverable:** Complete PI controller matching C++ features
+
+---
+
+#### **Phase 7 (Optional): Gain Scaling for Turning**
+
+**Challenge:** Pendulum environment has 1D action (ground velocity only), no yaw control
+
+**Options:**
+1. **Understand conceptually** (recommended):
+   - Read C++ lines 101-110
+   - Understand: turning increases leg stiffness
+   - Skip implementation (not applicable to Pendulum)
+
+2. **Upgrade to Servos environment:**
+   - Switch to `Upkie-PyBullet-Servos` (6-joint control)
+   - Implement differential wheel velocities for turning
+   - Add gain scaling to hip/knee joints
+   - **Time:** +3-4 hours
+
+**Deliverable:** Conceptual understanding, skip implementation for now
+
+---
+
+#### **Day 7 Summary: Compare & Document**
+
+**Create comparison table:**
+
+| Feature | Python Baseline | Python Enhanced | C++ Production |
+|---------|----------------|-----------------|----------------|
+| Integral term | ❌ | ✅ | ✅ |
+| Integral clamping | ❌ | ✅ | ✅ |
+| Air handling | ❌ | ✅ | ✅ |
+| Fall detection | ⚠️ | ✅ | ✅ |
+| Target limiting | ❌ | ✅ | ✅ |
+| NMP trick | ❌ | ✅ | ✅ |
+| Gain scaling | ❌ | 📝 Conceptual | ✅ |
+
+**Final experiment:**
+- Run Python baseline vs Python enhanced side-by-side
+- Push, tilt, disturb robot
+- Enhanced version much more robust!
+
+**Week 1 Deliverable:**
+- ✅ Complete PI controller in Python
+- ✅ Understand all C++ features
+- ✅ Can explain why each feature exists
+- ✅ Ready for Week 2 (systematic tuning)
 
 ---
 
