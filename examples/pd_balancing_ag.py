@@ -49,6 +49,9 @@ if __name__ == "__main__":
     ]
 
     with gym.make("Upkie-PyBullet-Pendulum", frequency=1000, gui=True) as env:
+        # Access PyBullet connection from backend
+        bullet_client = env.unwrapped.backend._bullet
+
         for exp_num, exp in enumerate(experiments, start=1):
             # Print to console
             print(f"\n{'='*60}")
@@ -63,7 +66,8 @@ if __name__ == "__main__":
                      f"Pitch={exp['pitch']:.1f} | Pos={exp['pos']:.1f} | Vel={exp['vel']:.2f}",
                 textPosition=[0, 0, 1.2],
                 textColorRGB=[1, 0, 0],
-                textSize=2.0
+                textSize=2.0,
+                physicsClientId=bullet_client
             )
 
             # Full reset
@@ -91,7 +95,7 @@ if __name__ == "__main__":
                     observation, info = env.reset()
 
             # Remove text before pause
-            pybullet.removeUserDebugItem(text_id)
+            pybullet.removeUserDebugItem(text_id, physicsClientId=bullet_client)
 
             # 2 second pause between experiments
             if exp_num < len(experiments):
