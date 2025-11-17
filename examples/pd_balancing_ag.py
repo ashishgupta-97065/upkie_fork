@@ -60,18 +60,18 @@ if __name__ == "__main__":
             print(f"Running for 5 seconds...")
             print(f"{'='*60}")
 
-            # Display on PyBullet GUI
+            # Full reset
+            observation, info = env.reset()
+
+            # Display on PyBullet GUI (after reset to avoid being cleared)
             text_id = pybullet.addUserDebugText(
                 text=f"Exp {exp_num}/{len(experiments)}: {exp['name']}\n"
                      f"Pitch={exp['pitch']:.1f} | Pos={exp['pos']:.1f} | Vel={exp['vel']:.2f}",
-                textPosition=[0, 0, 1.2],
+                textPosition=[0, 0, 2.0],  # Higher position
                 textColorRGB=[1, 0, 0],
-                textSize=2.0,
+                textSize=3.0,  # Larger text
                 physicsClientId=bullet_client
             )
-
-            # Full reset
-            observation, info = env.reset()
 
             # Run for 5 seconds (5000 steps at 1000 Hz)
             for step in range(5000):
